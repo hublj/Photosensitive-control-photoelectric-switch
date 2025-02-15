@@ -1,0 +1,130 @@
+#include <STC8G.h>
+#include <intrins.h>
+
+// 定义1ms延时函数
+void delay_1ms() {
+    unsigned char i, j;
+    _nop_();
+    i = 12;
+    j = 169;
+    do {
+        while (--j);
+    } while (--i);
+}
+
+// 初始化GPIO
+void GPIO_Init(void) {
+    // 设置P5.4为标准双向口
+    P5M1 &= ~0x10;
+    P5M0 &= ~0x10;
+
+    // 设置P5.5为标准双向口
+    P5M1 &= ~0x20;
+    P5M0 &= ~0x20;
+
+    // 设置P3.3为输出模式
+    P3M1 &= ~0x08;
+    P3M0 &= ~0x08;
+    P33 = 0; // 默认设置P3.3为低电平，继电器关闭
+}
+
+// 控制继电器开
+void Relay_On(void) {
+    P33 = 1;
+}
+
+// 控制继电器关
+void Relay_Off(void) {
+    P33 = 0;
+}
+
+// 继电器状态标志
+bit relay_state = 0;
+
+// P5.4 控制是否有效标志
+bit p54_control_valid = 0;
+
+// P5.5 计时（单位：ms）
+unsigned int p55_timer = 0;
+
+// 防抖计数
+#define DEBOUNCE_COUNT 10 // 防抖计数次数
+unsigned char p54_debounce_count = 0;
+unsigned char p55_debounce_count = 0;
+bit p54_debounced_state = 1;
+bit p55_debounced_state = 1;
+
+// 检查光电开关状态并控制继电器
+void Check_Sensor(void) {
+    bit current_p54_state = (P5 & 0x10) ? 1 : 0;
+    bit current_p55_state = (P5 & 0x20) ? 1 : 0;
+
+    // P5.5 引脚防抖处理
+    if (current_p55_state != p55_debounced_state) {
+        p55_debounce_count++;
+        if (p55_debounce_count >= DEBOUNCE_COUNT) {
+            p55_debounced_state = current_p55_state;
+            p55_debounce_count = 0;
+
+            if (p55_debounced_state == 0) {
+                // 当P5.5变为低电平，开始计时
+                p55_timer = 0;
+                while (p55_timer < 10000) {
+                    current_p55_state = (P5 & 0x20) ? 1 : 0;
+                    if (current_p55_state != p55_debounced_state) {
+                        // 如果计时过程中P5.5状态改变，重置计时
+                        p55_timer = 0;
+                        break;
+                    }
+                    delay_1ms();
+                    p55_timer++;
+                }
+                if (p55_timer >= 10000) {
+                    p54_control_valid = 1; // 允许P5.4控制继电器
+                }
+            } else {
+                // P5.5 为高电平，重置计时和控制标志
+                p55_timer = 0;
+                p54_control_valid = 0; // 禁止P5.4控制继电器
+                Relay_Off(); // 关闭继电器
+                relay_state = 0; // 确保继电器状态为关闭
+
+                // 重置P5.4的状态
+                p54_debounced_state = 1;
+                p54_debounce_count = 0;
+            }
+        }
+    } else {
+        p55_debounce_count = 0;
+    }
+
+    // P5.4 引脚防抖处理
+    if (p54_control_valid) {
+        if (current_p54_state != p54_debounced_state) {
+            p54_debounce_count++;
+            if (p54_debounce_count >= DEBOUNCE_COUNT) {
+                p54_debounced_state = current_p54_state;
+                p54_debounce_count = 0;
+
+                if (p54_debounced_state == 0 && !relay_state) {
+                    Relay_On(); // 打开继电器
+                    relay_state = 1;
+                } else if (p54_debounced_state == 0 && relay_state) {
+                    Relay_Off(); // 关闭继电器
+                    relay_state = 0;
+                }
+            }
+        } else {
+            p54_debounce_count = 0;
+        }
+    }
+}
+
+// 主函数
+void main(void) {
+    GPIO_Init();
+    while (1) {
+        Check_Sensor();
+        delay_1ms(); // 适当延时，避免CPU占用过高
+    }
+}

@@ -1,0 +1,117 @@
+#include <STC8G.h>
+#include <intrins.h>
+
+// 定义1ms延时函数
+void delay_1ms() {
+    unsigned char i, j;
+    _nop_();
+    i = 12;
+    j = 169;
+    do {
+        while (--j);
+    } while (--i);
+}
+
+// 全局变量定义
+bit relay_state = 0;          // 继电器状态标志
+bit p55_state = 0;            // P5.5 状态标志
+bit p55_counting = 0;         // P5.5 触发计时标志
+unsigned int p55_timer = 0;   // P5.5 计时（单位：ms）
+bit p54_control_valid = 0;    // P5.4 控制是否有效标志
+bit last_p54_state = 1;       // P5.4 的上一个状态
+
+// 初始化GPIO
+void GPIO_Init(void) {
+    // 设置P5.4为标准双向口
+    P5M1 &= ~0x10; 
+    P5M0 &= ~0x10;
+
+    // 设置P5.5为标准双向口
+    P5M1 &= ~0x20; 
+    P5M0 &= ~0x20;
+
+    // 设置P3.3为输出模式
+    P3M1 &= ~0x08; 
+    P3M0 &= ~0x08;
+    P33 = 0; // 默认设置P3.3为低电平，继电器关闭
+
+    // 初始化P5.4的初始状态
+    last_p54_state = (P5 & 0x10) ? 1 : 0; // 读取P5.4的实际状态
+}
+
+// 控制继电器开
+void Relay_On(void) { 
+    P33 = 1; 
+} 
+
+// 控制继电器关
+void Relay_Off(void) { 
+    P33 = 0; 
+} 
+
+// 检查光电开关状态并控制继电器
+void Check_Sensor(void) {
+    bit current_p54_state;
+    bit current_p55_state = (P5 & 0x20) ? 1 : 0; // 获取P5.5的状态
+
+    // 检测P5.5状态变化
+    if (current_p55_state != p55_state) {
+        p55_counting = 1;
+        p55_timer = 0;
+        p55_state = current_p55_state;
+
+        // 当P5.5翻转时，重置P5.4的状态
+        last_p54_state = (P5 & 0x10) ? 1 : 0; // 重新读取P5.4的实际状态
+        if (!current_p55_state) {
+            p54_control_valid = 0; // 禁止P5.4控制
+            Relay_Off(); // 关闭继电器
+            relay_state = 0; // 确保继电器状态为关闭
+        }
+    }
+
+    // 开始计时
+    if (p55_counting) {
+        delay_1ms(); // 每调用一次该函数，延时1ms
+        p55_timer++;
+        if (p55_timer >= 10000) { // 10秒
+            p55_counting = 0;
+            if (current_p55_state == 1) {
+                p54_control_valid = 1; // 允许P5.4控制继电器
+            } else {
+                p54_control_valid = 0; // 禁止P5.4控制继电器
+                Relay_Off(); // 关闭继电器
+                relay_state = 0; // 确保继电器状态为关闭
+            }
+        }
+    }
+
+    // 根据P5.4状态控制继电器
+    if (p54_control_valid) { // 仅当P5.4被允许控制时
+        current_p54_state = (P5 & 0x10) ? 1 : 0; // 获取P5.4的状态
+        if (current_p54_state != last_p54_state) {
+            delay_1ms();
+            delay_1ms(); // 消抖延时2ms
+            current_p54_state = (P5 & 0x10) ? 1 : 0; // 再次确认P5.4的状态
+            if (current_p54_state != last_p54_state) {
+                if (current_p54_state == 0) { // P5.4从高到低触发
+                    if (!relay_state) { // 如果继电器当前关闭
+                        Relay_On(); // 打开继电器
+                        relay_state = 1;
+                    } else { // 如果继电器当前打开
+                        Relay_Off(); // 关闭继电器
+                        relay_state = 0;
+                    }
+                }
+                last_p54_state = current_p54_state; // 更新P5.4的上一个状态
+            }
+        }
+    }
+}
+
+// 主函数
+void main(void) {
+    GPIO_Init();
+    while (1) {
+        Check_Sensor();
+    }
+}
