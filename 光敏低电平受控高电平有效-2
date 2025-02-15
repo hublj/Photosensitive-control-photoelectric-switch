@@ -1,6 +1,6 @@
 #include <STC8G.h>
 #include <intrins.h>
-测试2，p5.5直接检测，不需要上升沿下降沿
+//测试2，p5.5直接检测，不需要上升沿下降沿
 // 宏定义
 #define P54_MASK 0x10  // P5.4 的掩码
 #define P55_MASK 0x20  // P5.5 的掩码
