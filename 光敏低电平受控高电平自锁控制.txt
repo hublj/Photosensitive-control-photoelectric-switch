@@ -1,6 +1,6 @@
 #include <STC8G.h>
 #include <intrins.h>
-//这段代码有问题，需以后修改
+//这段代码有问题，需以后修改，后经测没有问题，是光敏电阻的问题
 // 定义1ms延时函数
 void delay_1ms() {
     unsigned char i, j;
